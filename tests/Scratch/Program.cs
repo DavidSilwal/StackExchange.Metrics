@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using StackExchange.Metrics;
 using StackExchange.Metrics.Handlers;
+using StackExchange.Metrics.Infrastructure;
 using StackExchange.Metrics.Metrics;
 
 namespace Scratch
@@ -80,21 +81,17 @@ namespace Scratch
                 }
             }
 
-            collector.BeforeSerialization += () => Console.WriteLine("BosunReporter: Running metrics snapshot.");
-            collector.AfterSerialization += info => Console.WriteLine($"BosunReporter: Metric Snapshot wrote {info.Count} metrics ({info.BytesWritten} bytes) to {info.Endpoint} in {info.Duration.TotalMilliseconds.ToString("0.##")}ms");
+            collector.BeforeSerialization += () => Console.WriteLine("StackExchange.Metrics: Running metrics snapshot.");
+            collector.AfterSerialization += info => Console.WriteLine($"StackExchange.Metrics: Metric Snapshot wrote {info.Count} metrics ({info.BytesWritten} bytes) to {info.Endpoint} in {info.Duration.TotalMilliseconds.ToString("0.##")}ms");
             collector.AfterSend += info =>
             {
                 if (info.Endpoint == LocalEndpointKey)
                 {
-                    foreach (var reading in localHandler.GetReadings())
-                    {
-                        Console.WriteLine($"{reading.Name}{reading.Suffix}@{reading.Timestamp:s} {reading.Value}");
-                    }
+                    collector.DumpAsync(Console.Out).Wait();
                 }
-                Console.WriteLine($"BosunReporter: Payload {info.PayloadType} - {info.BytesWritten} bytes posted to endpoint {info.Endpoint} in {info.Duration.TotalMilliseconds.ToString("0.##")}ms ({(info.Successful ? "SUCCESS" : "FAILED")})");
+                Console.WriteLine($"StackExchange.Metrics: Payload {info.PayloadType} - {info.BytesWritten} bytes posted to endpoint {info.Endpoint} in {info.Duration.TotalMilliseconds.ToString("0.##")}ms ({(info.Successful ? "SUCCESS" : "FAILED")})");
             };
 
-            collector.BindMetric("my_counter", "increments", typeof(TestCounter));
             var counter = collector.GetMetric<TestCounter>("my_counter", "increments", "This is meaningless.");
             counter.Increment();
             counter.Increment();
@@ -156,7 +153,7 @@ namespace Scratch
             var lotsOfCounters = new List<Counter>();
             for (var i = 0; i < 400; i++)
             {
-                lotsOfCounters.Add(collector.GetMetric("counter_" + i, "counts", "Testing lots of counters", new Counter()));
+                lotsOfCounters.Add(MetricSource.Default.GetMetric("counter_" + i, "counts", "Testing lots of counters", new Counter()));
             }
 
             var sai = 0;

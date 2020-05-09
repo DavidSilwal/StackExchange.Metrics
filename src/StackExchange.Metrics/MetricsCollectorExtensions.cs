@@ -64,11 +64,10 @@ namespace StackExchange.Metrics
             var localHandler = endpoints.Select(x => x.Handler).OfType<LocalMetricHandler>().FirstOrDefault();
             if (localHandler != null)
             {
-                foreach (var reading in localHandler.GetReadings(reset: false).OrderBy(r => r.NameWithSuffix))
+                foreach (var reading in localHandler.GetReadings(reset: false).OrderBy(r => r.Name))
                 {
                     await textWriter.WriteAsync("Name = ");
                     await textWriter.WriteAsync(reading.Name);
-                    await textWriter.WriteAsync(reading.Suffix);
                     await textWriter.WriteAsync(", Value = ");
                     await textWriter.WriteAsync(reading.Value.ToString());
                     await textWriter.WriteAsync(", Type = ");

@@ -9,14 +9,14 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Update="MetricGroup.tt">
+    <None Update="MetricGroup.Generated.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
-      <LastGenOutput>MetricGroup.cs</LastGenOutput>
+      <LastGenOutput>MetricGroup.Generated.cs</LastGenOutput>
     </None>
-    <Compile Update="MetricGroup.cs">
+    <Compile Update="MetricGroup.Generated.cs">
       <DesignTime>True</DesignTime>
       <AutoGen>True</AutoGen>
-      <DependentUpon>MetricGroup.tt</DependentUpon>
+      <DependentUpon>MetricGroup.Generated.tt</DependentUpon>
     </Compile>
   </ItemGroup>
 
@@ -35,5 +35,9 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="3.1.1" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="3.1.1" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="3.1.1" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <Service Include="{508349b6-6b84-4df5-91f0-309beebad82d}" />
   </ItemGroup>
 </Project>

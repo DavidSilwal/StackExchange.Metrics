@@ -1,6 +1,7 @@
 ﻿using StackExchange.Metrics.Infrastructure;
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
@@ -29,8 +30,8 @@ namespace StackExchange.Metrics.Metrics
         public static Func<int> GetDefaultMinimumEvents { get; set; } = () => 1;
 
         readonly object _recordLock = new object();
-        readonly double[] _percentiles;
-        readonly string[] _suffixes;
+        readonly ImmutableArray<double> _percentiles;
+        readonly ImmutableArray<string> _suffixes;
 
         readonly bool _trackMean;
         readonly bool _specialCaseMax;
@@ -50,25 +51,13 @@ namespace StackExchange.Metrics.Metrics
         int _count = 0;
 
         /// <summary>
-        /// The type of metric (gauge, in this case).
-        /// </summary>
-        public override MetricType MetricType => MetricType.Gauge;
-
-        /// <summary>
-        /// Determines the minimum number of events which need to be recorded in any given reporting interval
-        /// before they will be aggregated and reported. If this threshold is not met, the recorded data points
-        /// will be discarded at the end of the reporting interval.
-        /// </summary>
-        public virtual int MinimumEvents => GetDefaultMinimumEvents();
-
-        /// <summary>
         /// Protected constructor for calling from child classes.
         /// </summary>
-        protected AggregateGauge()
+        public AggregateGauge(string name, string unit = null, string description = null, bool includePrefix = true) : base(name, unit, description, includePrefix)
         {
             var strategy = GetAggregatorStategy();
             // denormalize these for one less level of indirection
-            _percentiles= strategy.Percentiles;
+            _percentiles = strategy.Percentiles;
             _suffixes = strategy.Suffixes;
             _trackMean = strategy.TrackMean;
             _specialCaseMin = strategy.SpecialCaseMin;
@@ -85,12 +74,25 @@ namespace StackExchange.Metrics.Metrics
         }
 
         /// <summary>
-        /// See <see cref="MetricBase.GetImmutableSuffixesArray"/>
+        /// The type of metric (gauge, in this case).
         /// </summary>
-        protected override string[] GetImmutableSuffixesArray()
+        public override MetricType MetricType => MetricType.Gauge;
+
+        /// <summary>
+        /// Determines the minimum number of events which need to be recorded in any given reporting interval
+        /// before they will be aggregated and reported. If this threshold is not met, the recorded data points
+        /// will be discarded at the end of the reporting interval.
+        /// </summary>
+        public virtual int MinimumEvents => GetDefaultMinimumEvents();
+
+
+        protected AggregateGauge()
         {
-            return _suffixes;
+
         }
+
+        /// <inheritdoc/>>
+        public override ImmutableArray<string> Suffixes => _suffixes;
 
         /// <summary>
         /// Records a data point on the aggregate gauge. This will likely not be sent to Bosun as an individual datapoint. Instead, it will be aggregated with
@@ -98,8 +100,6 @@ namespace StackExchange.Metrics.Metrics
         /// </summary>
         public void Record(double value)
         {
-            AssertAttached();
-
             lock (_recordLock)
             {
                 _count++;
@@ -182,10 +182,8 @@ namespace StackExchange.Metrics.Metrics
             return ip + ending + " percentile";
         }
 
-        /// <summary>
-        /// See <see cref="MetricBase.Serialize"/>
-        /// </summary>
-        protected override void Serialize(IMetricBatch writer, DateTime now)
+        /// <inheritdoc/>
+        protected override void Serialize(IMetricBatch writer, DateTime timestamp, string prefix, IReadOnlyDictionary<string, string> tags)
         {
             var mode = _snapshotReportingMode;
             if (mode == SnapshotReportingMode.None)
@@ -197,13 +195,11 @@ namespace StackExchange.Metrics.Metrics
                 if (countOnly && PercentileToAggregateMode(_percentiles[i]) != AggregateMode.Count)
                     continue;
 
-                WriteValue(writer, _snapshot[i], now, i);
+                WriteValue(writer, _snapshot[i], timestamp, prefix, _suffixes[i], tags);
             }
         }
 
-        /// <summary>
-        /// See <see cref="MetricBase.PreSerialize"/>
-        /// </summary>
+        /// <inheritdoc/>
         protected override void PreSerialize()
         {
             CaptureSnapshot();
@@ -426,31 +422,28 @@ namespace StackExchange.Metrics.Metrics
 
         class GaugeAggregatorStrategy
         {
-            public readonly double[] Percentiles;
-            public readonly string[] Suffixes;
-
-            public readonly bool UseList;
-            public readonly bool SpecialCaseMax;
-            public readonly bool SpecialCaseMin;
-            public readonly bool SpecialCaseLast;
-            public readonly bool TrackMean;
-            public readonly bool ReportCount;
+            public ImmutableArray<double> Percentiles { get; }
+            public ImmutableArray<string> Suffixes { get; }
+            public bool UseList { get; }
+            public bool SpecialCaseMax { get; }
+            public bool SpecialCaseMin { get; }
+            public bool SpecialCaseLast { get; }
+            public bool TrackMean { get; }
+            public bool ReportCount { get; }
 
             [SuppressMessage("ReSharper", "CompareOfFloatsByEqualityOperator")]
             public GaugeAggregatorStrategy(GaugeAggregatorAttribute[] aggregators)
             {
-                Percentiles = new double[aggregators.Length];
-                Suffixes = new string[aggregators.Length];
+                var percentiles = ImmutableArray.CreateBuilder<double>(aggregators.Length);
+                var suffixes = ImmutableArray.CreateBuilder<string>(aggregators.Length);
 
-                var i = 0;
                 var arbitraryPercentagesCount = 0;
                 foreach (var r in aggregators)
                 {
                     var percentile = r.Percentile;
 
-                    Percentiles[i] = percentile;
-                    Suffixes[i] = r.Suffix;
-                    i++;
+                    percentiles.Add(percentile);
+                    suffixes.Add(r.Suffix);
 
                     if (percentile < 0)
                     {
@@ -488,6 +481,9 @@ namespace StackExchange.Metrics.Metrics
                     SpecialCaseMax = false;
                     SpecialCaseMin = false;
                 }
+
+                Percentiles = percentiles.MoveToImmutable();
+                Suffixes = suffixes.MoveToImmutable();
             }
         }
     }

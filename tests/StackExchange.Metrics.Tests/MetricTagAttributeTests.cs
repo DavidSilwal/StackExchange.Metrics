@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using StackExchange.Metrics.Infrastructure;
@@ -15,6 +15,7 @@ namespace StackExchange.Metrics.Tests
             var defaultTags = ImmutableDictionary<string, string>.Empty;
             var tagConverter = new TagValueConverterDelegate((name, value) => value);
 
+            MetricsCollector.GetTags
             Assert.Throws<InvalidOperationException>(
                 () => metric.GetTags(defaultTags, tagConverter, x => x,new Dictionary<Type, List<MetricTag>>())
             );
@@ -133,7 +134,7 @@ namespace StackExchange.Metrics.Tests
         {
             public override MetricType MetricType { get; } = MetricType.Counter;
 
-            protected override void Serialize(IMetricBatch writer, DateTime now)
+            protected override void Serialize(IMetricBatch writer, DateTime timestamp, string prefix, IReadOnlyDictionary<string, string> tags)
             {
             }
         }

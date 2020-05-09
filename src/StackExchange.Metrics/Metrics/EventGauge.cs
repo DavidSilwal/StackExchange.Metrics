@@ -1,6 +1,7 @@
 ﻿using StackExchange.Metrics.Infrastructure;
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading;
 
 namespace StackExchange.Metrics.Metrics
@@ -11,30 +12,23 @@ namespace StackExchange.Metrics.Metrics
     /// </summary>
     public class EventGauge : MetricBase
     {
-        readonly struct PendingMetric
+        private ConcurrentBag<PendingMetric> _pendingSnapshot;
+        private ConcurrentBag<PendingMetric> _pendingMetrics = new ConcurrentBag<PendingMetric>();
+
+        /// <summary>
+        /// Instantiates a new event gauge.
+        /// </summary>
+        public EventGauge(string name, string unit = null, string description = null, bool includePrefix = true) : base(name, unit, description, includePrefix)
         {
-            public PendingMetric(double value, DateTime time)
-            {
-                Value = value;
-                Time = time;
-            }
-
-            public double Value { get; }
-            public DateTime Time { get; }
         }
-
-        ConcurrentBag<PendingMetric> _pendingSnapshot;
-        ConcurrentBag<PendingMetric> _pendingMetrics = new ConcurrentBag<PendingMetric>();
 
         /// <summary>
         /// The type of metric (gauge).
         /// </summary>
         public override MetricType MetricType => MetricType.Gauge;
 
-        /// <summary>
-        /// See <see cref="MetricBase.Serialize"/>
-        /// </summary>
-        protected override void Serialize(IMetricBatch writer, DateTime now)
+        /// <inheritdoc/>
+        protected override void Serialize(IMetricBatch writer, DateTime timestamp, string prefix, IReadOnlyDictionary<string, string> tags)
         {
             var pending = _pendingSnapshot;
             if (pending == null || pending.Count == 0)
@@ -42,7 +36,7 @@ namespace StackExchange.Metrics.Metrics
             
             foreach (var p in pending)
             {
-                WriteValue(writer, p.Value, p.Time);
+                WriteValue(writer, p.Value, p.Time, prefix, string.Empty, tags);
             }
         }
 
@@ -55,21 +49,25 @@ namespace StackExchange.Metrics.Metrics
         }
 
         /// <summary>
-        /// Records a data point which will be sent to Bosun.
+        /// Records a data point which will be sent to metrics handlers.
         /// </summary>
-        public void Record(double value)
-        {
-            AssertAttached();
-            _pendingMetrics.Add(new PendingMetric(value, DateTime.UtcNow));
-        }
+        public void Record(double value) => _pendingMetrics.Add(new PendingMetric(value, DateTime.UtcNow));
 
         /// <summary>
-        /// Records a data point with an explicit timestamp which will be sent to Bosun.
+        /// Records a data point with an explicit timestamp which will be sent to metrics handlers.
         /// </summary>
-        public void Record(double value, DateTime time)
+        public void Record(double value, DateTime time) => _pendingMetrics.Add(new PendingMetric(value, time));
+
+        private readonly struct PendingMetric
         {
-            AssertAttached();
-            _pendingMetrics.Add(new PendingMetric(value, time));
+            public PendingMetric(double value, DateTime time)
+            {
+                Value = value;
+                Time = time;
+            }
+
+            public double Value { get; }
+            public DateTime Time { get; }
         }
     }
 }

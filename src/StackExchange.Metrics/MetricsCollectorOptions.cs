@@ -36,9 +36,9 @@ namespace StackExchange.Metrics
         /// </summary>
         public IEnumerable<MetricEndpoint> Endpoints { get; set; } = Enumerable.Empty<MetricEndpoint>();
         /// <summary>
-        /// Zero or more pre-packaged sets of metrics. These are snapshotted every <see cref="SnapshotInterval"/>.
+        /// Zero or more sources of metrics. Metrics provided by a source are snapshotted every <see cref="SnapshotInterval"/>.
         /// </summary>
-        public IEnumerable<IMetricSet> Sets { get; set; } = Enumerable.Empty<IMetricSet>();
+        public IEnumerable<MetricSource> Sources { get; set; } = Enumerable.Empty<MetricSource>();
         /// <summary>
         /// If true, <see cref="MetricsCollector" /> will generate an exception every time posting to an endpoint fails with a server error (response code 5xx).
         /// </summary>
@@ -61,6 +61,11 @@ namespace StackExchange.Metrics
         /// The length of time to wait when flushing metrics to an endpoint fails. Defaults to 5 seconds.
         /// </summary>
         public TimeSpan RetryInterval { get; set; } = TimeSpan.FromSeconds(5);
+
+        /// <summary>
+        /// Number of times to retry when flushing metrics to an endpoint fails. Defaults to 3 attempts.
+        /// </summary>
+        public int RetryCount { get; set; } = 3;
 
         /// <summary>
         /// Allows you to specify a function which takes a property name and returns a tag name. This may be useful if you want to convert PropertyName to

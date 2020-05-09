@@ -336,7 +336,7 @@ namespace StackExchange.Metrics.Handlers
                     var epochConverter = (JsonConverter<DateTime>)options.GetConverter(typeof(DateTime));
 
                     writer.WriteStartObject(); // {
-                    writer.WriteString(s_metricProperty, reading.NameWithSuffix); // "metric": "name"
+                    writer.WriteString(s_metricProperty, reading.Name); // "metric": "name"
                     writer.WriteNumber(s_valueProperty, reading.Value); // ,"value": 1.23
                     if (reading.Tags.Count > 0)
                     {

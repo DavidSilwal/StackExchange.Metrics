@@ -20,7 +20,7 @@ namespace StackExchange.Metrics.Tests
                     {
                         new MetricEndpoint("Local", new LocalMetricHandler()),
                     },
-                    Sets = new[] { metricSet },
+                    Sources = new[] { metricSet },
                     RetryInterval = TimeSpan.Zero,
                     SnapshotInterval = TimeSpan.FromMilliseconds(20),
                 }
@@ -54,7 +54,7 @@ namespace StackExchange.Metrics.Tests
                         new MetricsCollectorOptions
                         {
                             Endpoints = new[] {new MetricEndpoint("Local", new LocalMetricHandler()),},
-                            Sets = new[] {metricSet},
+                            Sources = new[] {metricSet},
                             RetryInterval = TimeSpan.Zero,
                             SnapshotInterval = TimeSpan.FromMilliseconds(20),
                         }
@@ -72,7 +72,7 @@ namespace StackExchange.Metrics.Tests
                 new MetricsCollectorOptions
                 {
                     Endpoints = new[] {new MetricEndpoint("Local", new LocalMetricHandler()),},
-                    Sets = new[] {metricSet},
+                    Sources = new[] {metricSet},
                     RetryInterval = TimeSpan.Zero,
                     SnapshotInterval = TimeSpan.FromMilliseconds(20),
                     ExceptionHandler = ex => exceptionThrown.Set()
@@ -82,7 +82,7 @@ namespace StackExchange.Metrics.Tests
             Assert.True(exceptionThrown.Wait(TimeSpan.FromSeconds(1)), "Exception handler was not invoked");
         }
 
-        private class FailureMetricSet : IMetricSet
+        private class FailureMetricSet : MetricSource
         {
             private readonly bool _throwOnInitialize;
             private readonly bool _throwOnSnapshot;

@@ -21,10 +21,9 @@ namespace Microsoft.Extensions.DependencyInjection
             var builder = new MetricsCollectorBuilder(services);
 
             services
-                .AddSingleton<MetricsService>()
-                .AddSingleton<IMetricsCollector>(s => s.GetService<MetricsService>().Collector)
-                .AddSingleton<MetricsCollector>(s => s.GetService<MetricsService>().Collector)
-                .AddSingleton<IHostedService>(s => s.GetService<MetricsService>())
+                .AddSingleton<MetricsCollector>()
+                .AddSingleton<IMetricsCollector>(s => s.GetService<MetricsCollector>())
+                .AddSingleton<IHostedService>(s => s.GetService<MetricsCollector>())
                 .AddSingleton(s => Options.Options.Create(builder.Build(s)));
 
 #if NETCOREAPP

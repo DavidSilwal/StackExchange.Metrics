@@ -67,37 +67,37 @@ namespace StackExchange.Metrics.Tests
                 builder => builder.AddSet(metricSet)
             );
 
-            Assert.Contains(options.Sets, x => ReferenceEquals(x, metricSet));
+            Assert.Contains(options.Sources, x => ReferenceEquals(x, metricSet));
         }
 
         [Fact]
         public void Sets_RuntimeSetAdded()
         {
             var options = CreateOptions(
-                builder => builder.AddRuntimeMetricSet()
+                builder => builder.AddRuntimeMetricSource()
             );
 
-            Assert.Contains(options.Sets, x => x is RuntimeMetricSet);
+            Assert.Contains(options.Sources, x => x is RuntimeMetricSource);
         }
 
         [Fact]
         public void Sets_ProcessSetAdded()
         {
             var options = CreateOptions(
-                builder => builder.AddProcessMetricSet()
+                builder => builder.AddProcessMetricSource()
             );
 
-            Assert.Contains(options.Sets, x => x is ProcessMetricSet);
+            Assert.Contains(options.Sources, x => x is ProcessMetricSource);
         }
 
         [Fact]
         public void Sets_AspNetSetAdded()
         {
             var options = CreateOptions(
-                builder => builder.AddAspNetMetricSet()
+                builder => builder.AddAspNetMetricSource()
             );
 
-            Assert.Contains(options.Sets, x => x is AspNetMetricSet);
+            Assert.Contains(options.Sources, x => x is AspNetMetricSet);
         }
 
         [Fact]
@@ -107,9 +107,9 @@ namespace StackExchange.Metrics.Tests
                 builder => builder.AddDefaultSets()
             );
 
-            Assert.Contains(options.Sets, x => x is AspNetMetricSet);
-            Assert.Contains(options.Sets, x => x is RuntimeMetricSet);
-            Assert.Contains(options.Sets, x => x is ProcessMetricSet);
+            Assert.Contains(options.Sources, x => x is AspNetMetricSet);
+            Assert.Contains(options.Sources, x => x is RuntimeMetricSource);
+            Assert.Contains(options.Sources, x => x is ProcessMetricSource);
         }
 
         [Fact]

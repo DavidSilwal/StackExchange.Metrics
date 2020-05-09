@@ -163,7 +163,6 @@ namespace StackExchange.Metrics.Handlers
                     readingToWrite = new MetricReading(
                         reading.Name,
                         reading.Type,
-                        reading.Suffix,
                         reading.Value,
                         reading.Tags.Where(x => x.Key != "host").ToDictionary(x => x.Key, x => x.Value),
                         reading.Timestamp
@@ -265,7 +264,7 @@ namespace StackExchange.Metrics.Handlers
                 }
 
                 writer.WriteStartObject(); // {
-                writer.WriteString(s_metricProperty, reading.NameWithSuffix); // "metric": "name"
+                writer.WriteString(s_metricProperty, reading.Name); // "metric": "name"
                 writer.WriteNumber(s_valueProperty, value); // ,"value": 1.23
                 if (reading.Tags.Count > 0)
                 {

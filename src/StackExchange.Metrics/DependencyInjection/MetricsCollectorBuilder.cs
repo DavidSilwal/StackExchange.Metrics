@@ -46,7 +46,7 @@ namespace StackExchange.Metrics.DependencyInjection
 
         public MetricsCollectorOptions Build(IServiceProvider serviceProvider)
         {
-            Options.Sets = serviceProvider.GetServices<IMetricSet>();
+            Options.Sources = serviceProvider.GetServices<MetricSource>();
             Options.Endpoints = _metricEndpoints.ToImmutable();
             Options.DefaultTags = _defaultTags.ToImmutable();
             _configure?.Invoke(Options);

@@ -140,7 +140,7 @@ namespace StackExchange.Metrics.Handlers
 
             // calculate the length of buffer we need
             var encoding = Encoding.UTF8;
-            var length = encoding.GetByteCount(reading.NameWithSuffix) + s_colon.Length;
+            var length = encoding.GetByteCount(reading.Name) + s_colon.Length;
 
             // calculate the length needed to render the value
             var value = reading.Value;
@@ -184,7 +184,7 @@ namespace StackExchange.Metrics.Handlers
             // write data into the buffer
             {
                 // write the name into the buffer
-                bytesWritten += encoding.GetBytes(reading.NameWithSuffix, 0, reading.NameWithSuffix.Length, buffer, bytesWritten);
+                bytesWritten += encoding.GetBytes(reading.Name, 0, reading.Name.Length, buffer, bytesWritten);
 
                 // separator (:)
                 CopyToBuffer(s_colon);

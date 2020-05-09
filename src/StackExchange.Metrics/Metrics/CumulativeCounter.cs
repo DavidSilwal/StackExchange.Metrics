@@ -1,6 +1,7 @@
 ﻿using StackExchange.Metrics.Handlers;
 using StackExchange.Metrics.Infrastructure;
 using System;
+using System.Collections.Generic;
 using System.Threading;
 
 namespace StackExchange.Metrics.Metrics
@@ -15,8 +16,15 @@ namespace StackExchange.Metrics.Metrics
     /// </summary>
     public class CumulativeCounter : MetricBase
     {
-        long _countSnapshot;
-        long _count;
+        private long _countSnapshot;
+        private long _count;
+
+        /// <summary>
+        /// Instantiates a new cumulative counter.
+        /// </summary>
+        public CumulativeCounter(string name, string unit = null, string description = null, bool includePrefix = true) : base(name, unit, description, includePrefix)
+        {
+        }
 
         /// <summary>
         /// The current value of this counter. This will reset to zero at each reporting interval.
@@ -31,20 +39,14 @@ namespace StackExchange.Metrics.Metrics
         /// <summary>
         /// Increments the counter by one. If you need to increment by more than one at a time, it's probably too high volume for an external counter anyway.
         /// </summary>
-        public void Increment()
-        {
-            AssertAttached();
-            Interlocked.Increment(ref _count);
-        }
+        public void Increment() => Interlocked.Increment(ref _count);
 
-        /// <summary>
-        /// See <see cref="MetricBase.Serialize"/>
-        /// </summary>
-        protected override void Serialize(IMetricBatch writer, DateTime now)
+        /// <inheritdoc/>
+        protected override void Serialize(IMetricBatch writer, DateTime timestamp, string prefix, IReadOnlyDictionary<string, string> tags)
         {
             if (_countSnapshot > 0)
             {
-                WriteValue(writer, _countSnapshot, now);
+                WriteValue(writer, _countSnapshot, timestamp, prefix, string.Empty, tags);
             }
         }
 

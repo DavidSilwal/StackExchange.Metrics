@@ -1,5 +1,6 @@
 ﻿using StackExchange.Metrics.Infrastructure;
 using System;
+using System.Collections.Generic;
 using System.Threading;
 
 namespace StackExchange.Metrics.Metrics
@@ -28,30 +29,27 @@ namespace StackExchange.Metrics.Metrics
         public override MetricType MetricType => MetricType.Counter;
 
         /// <summary>
-        /// Instantiates a new counter. You should typically use a method on <see cref="MetricsCollector"/>, such as CreateMetric, instead of instantiating
-        /// directly via this constructor.
+        /// Instantiates a new counter.
         /// </summary>
-        public Counter()
+        public Counter(string name, string unit = null, string description = null, bool includePrefix = true) : base(name, unit, description, includePrefix)
         {
+
+            collector(prefix: "app", defaultTags: { "host":"myhost", "btag": "A"})
+            metric(name: "mycounter", tags: { "ctag": "hi"})
+            metric(name: "app.mycounter", tags: { "ctag": "hi"},includeprefix:false)
         }
 
         /// <summary>
         /// Increments the counter by <paramref name="amount"/>. This method is thread-safe.
         /// </summary>
-        public void Increment(long amount = 1)
-        {
-            AssertAttached();
-            Interlocked.Add(ref _count, amount);
-        }
+        public void Increment(long amount = 1) => Interlocked.Add(ref _count, amount);
 
-        /// <summary>
-        /// See <see cref="MetricBase.Serialize"/>
-        /// </summary>
-        protected override void Serialize(IMetricBatch writer, DateTime now)
+        /// <inheritdoc/>
+        protected override void Serialize(IMetricBatch writer, DateTime timestamp, string prefix, IReadOnlyDictionary<string, string> tags)
         {
             if (_countSnapshot > 0)
             {
-                WriteValue(writer, _countSnapshot, now);
+                WriteValue(writer, _countSnapshot, timestamp, prefix, string.Empty, tags);
             }
         }
 

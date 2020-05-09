@@ -34,7 +34,7 @@ namespace StackExchange.Metrics.Tests
             var port = (ushort)_rng.Next(1024, 65535);
             var handler = new StatsdMetricHandler("127.0.0.1", port);
             var utcNow = DateTime.UtcNow;
-            var reading = new MetricReading("test.metrics", MetricType.Counter, string.Empty, value, new Dictionary<string, string> { ["host"] = "test!" }, utcNow);
+            var reading = new MetricReading("test.metrics", MetricType.Counter, value, new Dictionary<string, string> { ["host"] = "test!" }, utcNow);
             var listenerTask = ReceiveStatsdOverUdpAsync(port, _output);
 
             // expected format: {metric}:{value}|{unit}|#{tag},{tag}
@@ -68,7 +68,7 @@ namespace StackExchange.Metrics.Tests
             static string ToTagString(IReadOnlyDictionary<string, string> tags) => string.Join(",", tags.Select(t => t.Key + ":" + t.Value));
 
             return Encoding.UTF8.GetBytes(
-                reading.NameWithSuffix + ":" + (reading.Value % 1 == 0 ? reading.Value.ToString("0") : reading.Value.ToString("0.00000")) + "|" + ToTypeString(reading.Type) + "|" + "#" + ToTagString(reading.Tags)
+                reading.Name + ":" + (reading.Value % 1 == 0 ? reading.Value.ToString("0") : reading.Value.ToString("0.00000")) + "|" + ToTypeString(reading.Type) + "|" + "#" + ToTagString(reading.Tags)
             );
         }
 

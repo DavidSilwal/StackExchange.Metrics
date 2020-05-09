@@ -1,10 +1,12 @@
-﻿using StackExchange.Metrics.Infrastructure;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+using StackExchange.Metrics.Infrastructure;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Linq;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -13,37 +15,18 @@ namespace StackExchange.Metrics
     /// <summary>
     /// The primary class for collecting metrics. Use this class to create metrics for reporting to various metric handlers.
     /// </summary>
-    public partial class MetricsCollector : IMetricsCollector
+    public partial class MetricsCollector : IMetricsCollector, IHostedService
     {
-        private class RootMetricInfo
-        {
-            public Type Type { get; set; }
-            public string Unit { get; set; }
-        }
-
-        private readonly object _metricsLock = new object();
-
-        // all of the first-class names which have been claimed (excluding suffixes in aggregate gauges)
-        private readonly Dictionary<string, RootMetricInfo> _rootNameToInfo = new Dictionary<string, RootMetricInfo>();
         private readonly ImmutableArray<MetricEndpoint> _endpoints;
-        private readonly ImmutableArray<IMetricSet> _sets;
-
-        // this dictionary is to avoid duplicate metrics
-        private readonly Dictionary<MetricKey, MetricBase> _rootNameAndTagsToMetric = new Dictionary<MetricKey, MetricBase>(MetricKeyComparer.Default);
-        private readonly List<MetricBase> _metrics = new List<MetricBase>();
-        private bool _hasNewMetadata = false;
-        private DateTime _lastMetadataFlushTime = DateTime.MinValue;
-        private readonly CancellationTokenSource _shutdownTokenSource;
+        private readonly ImmutableArray<MetricSource> _sources;
+        private readonly MetricCollection _metrics;
         private readonly List<MetricBase> _metricsNeedingPreSerialize = new List<MetricBase>();
 
-        // All of the names which have been claimed, including the metrics which may have multiple suffixes, mapped to their root metric name.
-        // This is to prevent suffix collisions with other metrics.
-        private readonly Dictionary<string, string> _nameAndSuffixToRootName = new Dictionary<string, string>();
-        private readonly Task _flushTask;
-        private readonly Task _reportingTask;
-        private readonly int _maxRetries;
-
-        internal Dictionary<Type, List<MetricTag>> TagsByTypeCache = new Dictionary<Type, List<MetricTag>>();
+        private bool _hasNewMetadata;
+        private DateTime _lastMetadataFlushTime = DateTime.MinValue;
+        private Task _flushTask;
+        private Task _reportingTask;
+        private CancellationTokenSource _shutdownTokenSource;
 
         /// <summary>
         /// If provided, all metric names will be prefixed with this value. This gives you the ability to keyspace your application. For example, you might
@@ -68,14 +51,13 @@ namespace StackExchange.Metrics
         /// </summary>
         public TimeSpan FlushInterval { get; }
         /// <summary>
+        /// Number of times to retry a flush operation before giving up.
+        /// </summary>
+        public int RetryCount { get; }
+        /// <summary>
         /// The length of time to wait before retrying a failed flush operation to an endpoint.
         /// </summary>
         public TimeSpan RetryInterval { get; }
-        /// <summary>
-        /// Allows you to specify a function which takes a property name and returns a tag name. This may be useful if you want to convert PropertyName to
-        /// property_name or similar transformations. This function does not apply to any tag names which are set manually via the MetricTag attribute.
-        /// </summary>
-        public Func<string, string> PropertyToTagName { get; }
         /// <summary>
         /// Allows you to specify a function which takes a tag name and value, and returns a possibly altered value. This could be used as a global sanitizer
         /// or normalizer. It is applied to all tag values, including default tags. If the return value is not a valid OpenTSDB tag, an exception will be
@@ -88,11 +70,6 @@ namespace StackExchange.Metrics
         /// tags will generally not be included in metadata.
         /// </summary>
         public IReadOnlyDictionary<string, string> DefaultTags { get; }
-
-        /// <summary>
-        /// True if <see cref="Shutdown"/> has been called on this collector.
-        /// </summary>
-        public bool ShutdownCalled => _shutdownTokenSource?.IsCancellationRequested ?? true;
 
         /// <summary>
         /// Exceptions which occur on a background thread within the collector will be passed to this delegate.
@@ -115,9 +92,14 @@ namespace StackExchange.Metrics
         public event Action<AfterSendInfo> AfterSend;
 
         /// <summary>
+        /// True if <see cref="Stop"/> has been called on this collector.
+        /// </summary>
+        public bool ShutdownCalled => _shutdownTokenSource?.IsCancellationRequested ?? true;
+
+        /// <summary>
         /// Enumerable of all metrics managed by this collector.
         /// </summary>
-        public IEnumerable<MetricBase> Metrics => _rootNameAndTagsToMetric.Values.AsEnumerable();
+        public IEnumerable<MetricBase> Metrics => _metrics.AsEnumerable();
 
         /// <summary>
         /// Enumerable of all endpoints managed by this collector.
@@ -125,9 +107,21 @@ namespace StackExchange.Metrics
         public IEnumerable<MetricEndpoint> Endpoints => _endpoints.AsEnumerable();
 
         /// <summary>
-        /// Enumerable of all sets managed by this collector.
+        /// Enumerable of all sources consumed by this collector.
         /// </summary>
-        public IEnumerable<IMetricSet> Sets => _sets.AsEnumerable();
+        public IEnumerable<MetricSource> Sources => _sources.AsEnumerable();
+
+        /// <summary>
+        /// Instantiates a new collector. You should typically only instantiate one collector for the lifetime of your
+        /// application. It will manage the serialization of metrics and sending data to metric handlers.
+        /// </summary>
+        /// <param name="options">
+        /// <see cref="MetricsCollectorOptions" /> representing the options to use for this collector.
+        /// </param>
+        [ActivatorUtilitiesConstructor]
+        public MetricsCollector(IOptions<MetricsCollectorOptions> options) : this(options.Value)
+        {
+        }
 
         /// <summary>
         /// Instantiates a new collector. You should typically only instantiate one collector for the lifetime of your
@@ -143,28 +137,47 @@ namespace StackExchange.Metrics
             if (MetricsNamePrefix != "" && !MetricValidation.IsValidMetricName(MetricsNamePrefix))
                 throw new Exception("\"" + MetricsNamePrefix + "\" is not a valid metric name prefix.");
 
-            _endpoints = options.Endpoints?.ToImmutableArray() ?? ImmutableArray<MetricEndpoint>.Empty;
-            _sets = options.Sets?.ToImmutableArray() ?? ImmutableArray<IMetricSet>.Empty;
-
             ThrowOnPostFail = options.ThrowOnPostFail;
             ThrowOnQueueFull = options.ThrowOnQueueFull;
             ReportingInterval = options.SnapshotInterval;
             FlushInterval = options.FlushInterval;
             RetryInterval = options.RetryInterval;
-            PropertyToTagName = options.PropertyToTagName;
+            RetryCount = options.RetryCount;
             TagValueConverter = options.TagValueConverter;
             DefaultTags = ValidateDefaultTags(options.DefaultTags);
 
-            _maxRetries = 3;
-            _shutdownTokenSource = new CancellationTokenSource();
-
-            // initialize any metric sets
-            foreach (var set in _sets)
+            _endpoints = options.Endpoints?.ToImmutableArray() ?? ImmutableArray<MetricEndpoint>.Empty;
+            _sources = options.Sources?.ToImmutableArray() ?? ImmutableArray<MetricSource>.Empty;
+            _metrics = new MetricCollection(MetricsNamePrefix, DefaultTags, options.TagValueConverter, options.PropertyToTagName);
+            foreach (var metric in _sources.SelectMany(x => x.GetAll()))
             {
-                set.Initialize(this);
+                _metrics.Add(metric);
+                if (metric.NeedsPreserialize())
+                {
+                    _metricsNeedingPreSerialize.Add(metric);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Starts the collector.
+        /// </summary>
+        /// <remarks>
+        /// This operation starts the snapshot and flush background tasks and attaches the collector
+        /// to all of its metric sources.
+        /// </remarks>
+        public void Start()
+        {
+            // attach to all metric sources
+            foreach (var source in _sources)
+            {
+                source.Attach(this);
+                source.MetricAdded += OnMetricAdded;
             }
 
-            // start continuous queue-flushing
+            _shutdownTokenSource = new CancellationTokenSource();
+
+            // start background threads for flushing and snapshotting
             _flushTask = Task.Run(
                 async () =>
                 {
@@ -174,7 +187,7 @@ namespace StackExchange.Metrics
 
                         try
                         {
-                            await FlushAsync(true);
+                            await FlushAsync();
                         }
                         catch (Exception ex)
                         {
@@ -183,7 +196,6 @@ namespace StackExchange.Metrics
                     }
                 });
 
-            // start reporting timer
             _reportingTask = Task.Run(
                 async () =>
                 {
@@ -193,7 +205,7 @@ namespace StackExchange.Metrics
 
                         try
                         {
-                            await SnapshotAsync(true);
+                            await SnapshotAsync();
                         }
                         catch (Exception ex)
                         {
@@ -202,21 +214,54 @@ namespace StackExchange.Metrics
                     }
                 });
         }
+
         /// <summary>
-        /// Attempts to get basic information about a metric, by name. Returns false if no metric by that name exists.
+        /// Stops the collector.
         /// </summary>
-        public bool TryGetMetricInfo(string name, out Type type, out string unit, bool includePrefix = true)
+        /// <remarks>
+        /// This operation cancels the snapshot and flush background tasks, detaches the collector
+        /// from all of its metric sources and waits for background tasks to complete.
+        /// </remarks>
+        public void Stop()
         {
-            if (_rootNameToInfo.TryGetValue(includePrefix ? MetricsNamePrefix + name : name, out var rmi))
+            Debug.WriteLine("StackExchange.Metrics: Shutting down MetricsCollector.");
+
+            // notify background tasks to stop
+            _shutdownTokenSource.Cancel();
+
+            // clean-up all metric endpoints
+            foreach (var endpoint in _endpoints)
             {
-                type = rmi.Type;
-                unit = rmi.Unit;
-                return true;
+                endpoint.Handler.Dispose();
             }
 
-            type = null;
-            unit = null;
-            return false;
+            // and detach from all sources
+            foreach (var source in _sources)
+            {
+                source.MetricAdded -= OnMetricAdded;
+                source.Detach(this);
+            }
+        }
+
+        Task IHostedService.StartAsync(CancellationToken cancellationToken)
+        {
+            Start();
+            return Task.CompletedTask;
+        }
+
+        Task IHostedService.StopAsync(CancellationToken cancellationToken)
+        {
+            Stop();
+            return Task.CompletedTask;
+        }
+
+        private void OnMetricAdded(object sender, MetricBase metric)
+        {
+            _metrics.Add(metric);
+            if (metric.NeedsPreserialize())
+            {
+                _metricsNeedingPreSerialize.Add(metric);
+            }
         }
 
         private IReadOnlyDictionary<string, string> ValidateDefaultTags(IReadOnlyDictionary<string, string> tags)
@@ -238,243 +283,13 @@ namespace StackExchange.Metrics
             return defaultTagBuilder.ToImmutable();
         }
 
-        /// <summary>
-        /// Binds a given metric name to a specific data model. Metrics with this name will only be allowed to use the type <paramref name="type"/>. Calling
-        /// this method is usually not necessary. A metric will be bound to the type that it is first instantiated with.
-        /// </summary>
-        public void BindMetric(string name, string unit, Type type, bool includePrefix = true)
+        private Task SnapshotAsync()
         {
-            if (includePrefix)
-            {
-                name = MetricsNamePrefix + name;
-            }
-
-            lock (_metricsLock)
-            {
-                if (_rootNameToInfo.TryGetValue(name, out var rmi))
-                {
-                    if (rmi.Type != type)
-                    {
-                        throw new Exception($"Cannot bind metric name \"{name}\" to Type {type.FullName}. It has already been bound to {rmi.Type.FullName}");
-                    }
-
-                    if (rmi.Unit != unit)
-                    {
-                        throw new Exception($"Cannot bind metric name \"{name}\" to unit \"{unit}\". It has already been bound to \"{rmi.Unit}\"");
-                    }
-
-                    return;
-                }
-
-                if (!type.IsSubclassOf(typeof(MetricBase)))
-                {
-                    throw new Exception($"Cannot bind metric \"{name}\" to Type {type.FullName}. It does not inherit from MetricBase.");
-                }
-
-                _rootNameToInfo[name] = new RootMetricInfo { Type = type, Unit = unit };
-            }
-        }
-
-        /// <summary>
-        /// Creates a metric (time series) and adds it to the collector. An exception will be thrown if a metric by the same name and tag values already exists.
-        /// </summary>
-        /// <param name="name">The metric name. If <paramref name="includePrefix"/>, global prefix <see cref="MetricsCollectorOptions.MetricsNamePrefix"/> will be prepended.</param>
-        /// <param name="unit">The units of the metric (e.g. "milliseconds").</param>
-        /// <param name="description">The metadata description of the metric.</param>
-        /// <param name="metricFactory">A delegate which will be called to instantiate the metric.</param>
-        /// <param name="includePrefix">Whether the <see cref="MetricsCollectorOptions.MetricsNamePrefix"/> will be prepended to the metric name.</param>
-        public T CreateMetric<T>(string name, string unit, string description, Func<T> metricFactory, bool includePrefix = true) where T : MetricBase
-        {
-            return GetMetricInternal(name, true, unit, description, metricFactory(), true);
-        }
-
-        /// <summary>
-        /// Creates a metric (time series) and adds it to the collector. An exception will be thrown if a metric by the same name and tag values already exists.
-        /// </summary>
-        /// <param name="name">The metric name. If <paramref name="includePrefix"/>, global prefix <see cref="MetricsCollectorOptions.MetricsNamePrefix"/> will be prepended.</param>
-        /// <param name="unit">The units of the metric (e.g. "milliseconds").</param>
-        /// <param name="description">The metadata description of the metric.</param>
-        /// <param name="metric">A pre-instantiated metric, or null if the metric type has a default constructor.</param>
-        /// <param name="includePrefix">Whether the <see cref="MetricsCollectorOptions.MetricsNamePrefix"/> will be prepended to the metric name.</param>
-        public T CreateMetric<T>(string name, string unit, string description, T metric = null, bool includePrefix = true) where T : MetricBase
-        {
-            return GetMetricInternal(name, includePrefix, unit, description, metric, true);
-        }
-
-        /// <summary>
-        /// Creates a metric (time series) and adds it to the collector. If a metric by the same name and tag values already exists, then that metric is
-        /// returned.
-        /// </summary>
-        /// <param name="name">The metric name. If <paramref name="includePrefix"/>, global prefix <see cref="MetricsCollectorOptions.MetricsNamePrefix"/> will be prepended.</param>
-        /// <param name="unit">The units of the metric (e.g. "milliseconds").</param>
-        /// <param name="description">The metadata description of the metric.</param>
-        /// <param name="metricFactory">A delegate which will be called to instantiate the metric.</param>
-        /// <param name="includePrefix">Whether the <see cref="MetricsCollectorOptions.MetricsNamePrefix"/> will be prepended to the metric name.</param>
-        public T GetMetric<T>(string name, string unit, string description, Func<T> metricFactory, bool includePrefix = true) where T : MetricBase
-        {
-            return GetMetricInternal(name, includePrefix, unit, description, metricFactory(), false);
-        }
-
-        /// <summary>
-        /// Creates a metric (time series) and adds it to the collector. If a metric by the same name and tag values already exists, then that metric is
-        /// returned.
-        /// </summary>
-        /// <param name="name">The metric name. If <paramref name="includePrefix"/>, global prefix <see cref="MetricsCollectorOptions.MetricsNamePrefix"/> will be prepended.</param>
-        /// <param name="unit">The units of the metric (e.g. "milliseconds").</param>
-        /// <param name="description">The metadata description of the metric.</param>
-        /// <param name="metric">A pre-instantiated metric, or null if the metric type has a default constructor.</param>
-        /// <param name="includePrefix">Whether the <see cref="MetricsCollectorOptions.MetricsNamePrefix"/> will be prepended to the metric name.</param>
-        public T GetMetric<T>(string name, string unit, string description, T metric = null, bool includePrefix = true) where T : MetricBase
-        {
-            return GetMetricInternal(name, includePrefix, unit, description, metric, false);
-        }
-
-        private T GetMetricInternal<T>(string name, bool addPrefix, string unit, string description, T metric, bool mustBeNew) where T : MetricBase
-        {
-            if (addPrefix)
-                name = MetricsNamePrefix + name;
-
-            var metricType = typeof(T);
-            if (metric == null)
-            {
-                // if the type has a constructor without params, then create an instance
-                var constructor = metricType.GetConstructor(BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null);
-                if (constructor == null)
-                    throw new ArgumentNullException(nameof(metric), metricType.FullName + " has no public default constructor. Therefore the metric parameter cannot be null.");
-                metric = (T)constructor.Invoke(new object[0]);
-            }
-            metric.Collector = this;
-
-            metric.Name = name;
-            metric.Description = description;
-            metric.Unit = unit;
-
-            metric.LoadSuffixes();
-
-            lock (_metricsLock)
-            {
-                if (_rootNameToInfo.TryGetValue(name, out var rmi))
-                {
-                    if (rmi.Type != metricType)
-                    {
-                        throw new Exception(
-                            $"Attempted to create metric name \"{name}\" with Type {metricType.FullName}. This metric name has already been bound to Type {rmi.Type.FullName}.");
-                    }
-
-                    if (rmi.Unit != unit)
-                    {
-                        throw new Exception(
-                            $"Cannot bind metric name \"{name}\" to unit \"{unit}\". It has already been bound to \"{rmi.Unit}\"");
-                    }
-                }
-                else if (_nameAndSuffixToRootName.ContainsKey(name))
-                {
-                    throw new Exception(
-                        $"Attempted to create metric name \"{name}\" with Type {metricType.FullName}. " +
-                        $"This metric name is already in use as a suffix of Type {_rootNameToInfo[_nameAndSuffixToRootName[name]].Type.FullName}.");
-                }
-
-                // claim all suffixes. Do this in two passes (check then add) so we don't end up in an inconsistent state.
-                foreach (var s in metric.SuffixesArray)
-                {
-                    var ns = name + s;
-
-                    // verify this is a valid metric name at all (it should be, since both parts are pre-validated, but just in case).
-                    if (!MetricValidation.IsValidMetricName(ns))
-                        throw new Exception($"\"{ns}\" is not a valid metric name");
-
-                    if (_nameAndSuffixToRootName.ContainsKey(ns) && _nameAndSuffixToRootName[ns] != name)
-                    {
-                        throw new Exception(
-                            $"Attempted to create metric name \"{ns}\" with Type {metricType.FullName}. " +
-                            $"This metric name is already in use as a suffix of Type {_rootNameToInfo[_nameAndSuffixToRootName[ns]].Type.FullName}.");
-                    }
-                }
-
-                foreach (var s in metric.SuffixesArray)
-                {
-                    _nameAndSuffixToRootName[name + s] = name;
-                }
-
-                // claim the root type
-                _rootNameToInfo[name] = new RootMetricInfo { Type = metricType, Unit = unit };
-
-                // see if this metric name and tag combination already exists
-                var key = metric.GetMetricKey();
-                if (_rootNameAndTagsToMetric.ContainsKey(key))
-                {
-                    if (mustBeNew)
-                        throw new Exception($"Attempted to create duplicate metric with name \"{name}\" and tags {string.Join(", ", metric.Tags.Keys)}.");
-
-                    return (T)_rootNameAndTagsToMetric[key];
-                }
-
-                // metric doesn't exist yet.
-                _rootNameAndTagsToMetric[key] = metric;
-                metric.IsAttached = true;
-                _hasNewMetadata = true;
-
-                var needsPreSerialize = metric.NeedsPreSerializeCalled();
-                if (needsPreSerialize)
-                    _metricsNeedingPreSerialize.Add(metric);
-
-                _metrics.Add(metric);
-
-                if (metric.SerializeInitialValue)
-                {
-                    if (needsPreSerialize)
-                        metric.PreSerializeInternal();
-
-                    foreach (var endpoint in _endpoints)
-                    {
-                        using (var batch = endpoint.Handler.BeginBatch())
-                        {
-                            try
-                            {
-                                metric.SerializeInternal(batch, DateTime.UtcNow);
-                            }
-                            catch (Exception ex)
-                            {
-                                SendExceptionToHandler(ex);
-                            }
-                        }
-                    }
-                }
-
-                return metric;
-            }
-        }
-
-        /// <summary>
-        /// This method should only be called on application shutdown, and should not be called more than once.
-        /// When called, it runs one final metric snapshot and makes a single attempt to flush all metrics in the queue.
-        /// </summary>
-        public void Shutdown()
-        {
-            Debug.WriteLine("StackExchange.Metrics: Shutting down MetricsCollector.");
-            _shutdownTokenSource.Cancel();
-
-            foreach (var endpoint in _endpoints)
-            {
-                endpoint.Handler.Dispose();
-            }
-        }
-
-        private Task SnapshotAsync(bool isCalledFromTimer)
-        {
-            if (isCalledFromTimer && ShutdownCalled) // don't perform timer actions if we're shutting down
-                return Task.CompletedTask;
-
             try
             {
-                if (BeforeSerialization != null && BeforeSerialization.GetInvocationList().Length != 0)
-                    BeforeSerialization();
-
-                // snapshot any metric sets
-                foreach (var set in _sets)
-                {
-                    set.Snapshot();
-                }
+                var beforeSerialization = BeforeSerialization;
+                if (beforeSerialization?.GetInvocationList().Length != 0)
+                    beforeSerialization();
 
                 IReadOnlyList<MetaData> metadata = Array.Empty<MetaData>();
                 if (_hasNewMetadata || DateTime.UtcNow - _lastMetadataFlushTime >= TimeSpan.FromDays(1))
@@ -519,11 +334,8 @@ namespace StackExchange.Metrics
             return Task.CompletedTask;
         }
 
-        private async Task FlushAsync(bool isCalledFromTimer)
+        private async Task FlushAsync()
         {
-            if (isCalledFromTimer && ShutdownCalled) // don't perform timer actions if we're shutting down
-                return;
-
             if (_endpoints.Length == 0)
             {
                 Debug.WriteLine("StackExchange.Metrics: No endpoints. Dropping data.");
@@ -538,7 +350,7 @@ namespace StackExchange.Metrics
                 {
                     await endpoint.Handler.FlushAsync(
                         RetryInterval,
-                        _maxRetries,
+                        RetryCount,
                         // Use Task.Run here to invoke the event listeners asynchronously.
                         // We're inside a lock, so calling the listeners synchronously would put us at risk of a deadlock.
                         info => Task.Run(
@@ -568,33 +380,32 @@ namespace StackExchange.Metrics
 
         private void SerializeMetrics(MetricEndpoint endpoint, DateTime timestamp, out long metricsCount, out long bytesWritten)
         {
-            lock (_metricsLock)
+            metricsCount = 0;
+            bytesWritten = 0;
+            if (_metrics.Count == 0)
+                return;
+
+            using (var batch = endpoint.Handler.BeginBatch())
             {
-                metricsCount = 0;
-                bytesWritten = 0;
-                if (_metrics.Count == 0)
-                    return;
-
-                using (var batch = endpoint.Handler.BeginBatch())
+                foreach (var m in _metrics)
                 {
-                    foreach (var m in _metrics)
+                    var metricType = m.GetType();
+                    if (_)
+                    try
                     {
-                        try
-                        {
-                            m.SerializeInternal(batch, timestamp);
-                        }
-                        catch (Exception ex)
-                        {
-                            ex.Data["Endpoint.Name"] = endpoint.Name;
-                            ex.Data["Endpoint.Type"] = endpoint.Handler.GetType();
-
-                            SendExceptionToHandler(ex);
-                        }
+                        m.SerializeInternal(batch, timestamp, MetricsNamePrefix, m.GetTags(Defauylt);
                     }
+                    catch (Exception ex)
+                    {
+                        ex.Data["Endpoint.Name"] = endpoint.Name;
+                        ex.Data["Endpoint.Type"] = endpoint.Handler.GetType();
 
-                    metricsCount += batch.MetricsWritten;
-                    bytesWritten += batch.BytesWritten;
+                        SendExceptionToHandler(ex);
+                    }
                 }
+
+                metricsCount += batch.MetricsWritten;
+                bytesWritten += batch.BytesWritten;
             }
         }
 
@@ -608,20 +419,17 @@ namespace StackExchange.Metrics
 
         private IReadOnlyList<MetaData> GatherMetaData()
         {
-            lock (_metricsLock)
+            var allMetadata = new List<MetaData>();
+            foreach (var metric in _metrics)
             {
-                var allMetadata = new List<MetaData>();
-                foreach (var metric in Metrics)
-                {
-                    if (metric == null)
-                        continue;
+                if (metric == null)
+                    continue;
 
-                    allMetadata.AddRange(metric.GetMetaData());
-                }
-
-                _hasNewMetadata = false;
-                return allMetadata;
+                allMetadata.AddRange(metric.GetMetaData(MetricsNamePrefix));
             }
+
+            _hasNewMetadata = false;
+            return allMetadata;
         }
 
         private void SendExceptionToHandler(Exception ex)

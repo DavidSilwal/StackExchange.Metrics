@@ -1,5 +1,6 @@
 ﻿using StackExchange.Metrics.Infrastructure;
 using System;
+using System.Collections.Generic;
 using System.Threading;
 
 namespace StackExchange.Metrics.Metrics
@@ -10,7 +11,14 @@ namespace StackExchange.Metrics.Metrics
     /// </summary>
     public class SamplingGauge : MetricBase
     {
-        double _value = double.NaN;
+        private double _value = double.NaN;
+
+        /// <summary>
+        /// Instantiates a new sampling gauge.
+        /// </summary>
+        public SamplingGauge(string name, string unit = null, string description = null, bool includePrefix = true) : base(name, unit, description, includePrefix)
+        {
+        }
 
         /// <summary>
         /// The current value of the gauge.
@@ -22,25 +30,19 @@ namespace StackExchange.Metrics.Metrics
         /// </summary>
         public override MetricType MetricType => MetricType.Gauge;
 
-        /// <summary>
-        /// See <see cref="MetricBase.Serialize"/>
-        /// </summary>
-        protected override void Serialize(IMetricBatch writer, DateTime now)
+        /// <inheritdoc/>
+        protected override void Serialize(IMetricBatch writer, DateTime timestamp, string prefix, IReadOnlyDictionary<string, string> tags)
         {
             var value = _value;
             if (double.IsNaN(value))
                 return;
 
-            WriteValue(writer, value, now);
+            WriteValue(writer, value, timestamp, prefix, string.Empty, tags);
         }
 
         /// <summary>
         /// Records the current value of the gauge. Use Double.NaN to disable this gauge.
         /// </summary>
-        public void Record(double value)
-        {
-            AssertAttached();
-            Interlocked.Exchange(ref _value, value);
-        }
+        public void Record(double value) => Interlocked.Exchange(ref _value, value);
     }
 }

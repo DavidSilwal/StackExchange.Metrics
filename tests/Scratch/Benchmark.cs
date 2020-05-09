@@ -75,9 +75,9 @@ namespace Scratch
         {
             _cancellationTokenSource.Cancel();
             _cancellationTokenSource.Dispose();
-            _emptyCollector.Shutdown();
-            _httpCollector.Shutdown();
-            _udpCollector.Shutdown();
+            _emptyCollector.Stop();
+            _httpCollector.Stop();
+            _udpCollector.Stop();
         }
 
         [Benchmark(Baseline = true)]
@@ -115,8 +115,8 @@ namespace Scratch
         [Benchmark]
         public async Task Udp()
         {
-            var counter = _udpCollector.GetMetric<Counter>("counter", "ms", "Testing 1,2,3");
-            var gauge = _udpCollector.GetMetric<EventGauge>("gauge", "units", "Testing 1,2,3");
+            var counter = MetricSource.Default.AddMetric(new Counter("counter", "ms", "Testing 1, 2, 3"));
+            var gauge = MetricSource.Default.AddMetric(new EventGauge("counter", "ms", "Testing 1, 2, 3"));
             var timeout = TimeSpan.FromSeconds(2);
             var start = DateTime.UtcNow;
             var value = 0.23d;

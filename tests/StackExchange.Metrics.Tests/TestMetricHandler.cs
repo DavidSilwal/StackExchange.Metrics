@@ -86,7 +86,7 @@ namespace StackExchange.Metrics.Tests
         protected new virtual string SerializeMetric(in MetricReading reading)
         {
             var sb = new StringBuilder();
-            sb.Append(reading.NameWithSuffix);
+            sb.Append(reading.Name);
             sb.Append('|');
             sb.Append(reading.Value);
             sb.Append('|');

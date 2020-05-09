@@ -1,25 +1,28 @@
+﻿using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using StackExchange.Metrics.Infrastructure;
 
 namespace StackExchange.Metrics.Tests
 {
-    public class TestMetricSet : IMetricSet
+    public class TestMetricSet : MetricSource
     {
-        private readonly TaskCompletionSource<object> _initializeTask;
-        private readonly TaskCompletionSource<object> _snapshotTask;
+        private readonly TaskCompletionSource<object> _attachTask;
+        private readonly TaskCompletionSource<object> _detachTask;
 
-        public Task InitializeTask => _initializeTask.Task;
-
-        public Task SnapshotTask => _snapshotTask.Task;
+        public Task AttachTask => _attachTask.Task;
+        public Task DetachTask => _detachTask.Task;
 
         public TestMetricSet()
         {
-            _initializeTask = new TaskCompletionSource<object>();
-            _snapshotTask = new TaskCompletionSource<object>();
+            _attachTask = new TaskCompletionSource<object>();
+            _detachTask = new TaskCompletionSource<object>();
         }
 
-        public void Initialize(IMetricsCollector collector) => _initializeTask.TrySetResult(null);
+        public override void Attach(IMetricsCollector collector) => _attachTask.TrySetResult(null);
 
-        public void Snapshot() => _snapshotTask.TrySetResult(null);
+        public override void Detach(IMetricsCollector collector) => _detachTask.TrySetResult(null);
+
+        public override IEnumerable<MetricBase> GetAll() => Enumerable.Empty<MetricBase>();
     }
 }
