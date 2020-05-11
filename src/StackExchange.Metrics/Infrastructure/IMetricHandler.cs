@@ -16,7 +16,7 @@ namespace StackExchange.Metrics.Infrastructure
         /// <returns>
         /// An <see cref="IMetricBatch" /> used to add individual metrics.
         /// </returns>
-        IMetricBatch BeginBatch();
+        IMetricReadingWriterBatch BeginBatch();
 
         /// <summary>
         /// Serializes metadata about metrics.

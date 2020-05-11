@@ -3,9 +3,10 @@
 namespace StackExchange.Metrics.Infrastructure
 {
     /// <summary>
-    /// Exposes functionality used to add metrics to a queue.
+    /// Exposes functionality used to add metric readings to a batch that will be
+    /// serialized and later flushed to a metric endpoint.
     /// </summary>
-    public interface IMetricBatch : IDisposable
+    public interface IMetricReadingWriterBatch : IDisposable
     {
         /// <summary>
         /// Number of bytes written in this batch.
@@ -13,16 +14,16 @@ namespace StackExchange.Metrics.Infrastructure
         long BytesWritten { get; }
 
         /// <summary>
-        /// Number of metrics written in this batch.
+        /// Number of metric readings written in this batch.
         /// </summary>
         long MetricsWritten { get; }
 
         /// <summary>
-        /// Serializes a metric in preparation for flushing it to an endpoint.
+        /// Adds a metric reading to the batch in preparation for flushing it to an endpoint.
         /// </summary>
         /// <param name="reading">
-        /// <see cref="MetricReading" /> struct containing data about the metric to write.
+        /// <see cref="MetricReading" /> struct containing data about the metric reading to add.
         /// </param>
-        void SerializeMetric(in MetricReading reading);
+        void Add(in MetricReading reading);
     }
 }
